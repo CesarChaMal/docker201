@@ -4,8 +4,13 @@ provider "aws" {
   region   = "us-east-1"
 }
 
+data "external" "public_ip" {
+  program = ["./bin/local-ip.sh"]
+}
+
 resource "aws_instance" "manager" {
-  ami           = "ami-835d69f8"
+  count         = "${var.swarm_manager_count}"
+  ami           = "ami-5c66ea23"
   instance_type = "m4.large"
   security_groups = ["${aws_security_group.swarm.name}"]
   key_name = "${aws_key_pair.deployer.key_name}"
@@ -14,8 +19,12 @@ resource "aws_instance" "manager" {
     private_key = "${file(var.ssh_private_key_path)}"
   }
   provisioner "file" {
-    source = "./etc-default-docker"
-    destination = "/tmp/etc-default-docker"
+    source = "./files/startup_options.conf"
+    destination = "/tmp/startup_options.conf"
+  }
+  provisioner "file" {
+    source = "./files/daemon.json"
+    destination = "/tmp/daemon.json"
   }
   provisioner "remote-exec" {
     inline = [
@@ -26,22 +35,26 @@ resource "aws_instance" "manager" {
       "sudo add-apt-repository \"deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable\"",
       "sudo apt-get update",
       "sudo apt-get install -y docker-ce",
-      "sudo cp /tmp/etc-default-docker /etc/default/docker",
-      "sudo service docker restart",
       "sudo usermod -aG docker ubuntu",
-      "#sudo docker swarm init",
-      "#sudo docker swarm join-token --quiet worker > /home/ubuntu/token"
+      "wget https://storage.googleapis.com/gvisor/releases/nightly/latest/runsc",
+      "chmod +x runsc",
+      "sudo mv runsc /usr/local/bin",
+      "sudo cp /tmp/daemon.json /etc/docker/daemon.json",
+      "sudo mkdir -p /etc/systemd/system/docker.service.d/",
+      "sudo cp /tmp/startup_options.conf /etc/systemd/system/docker.service.d/startup_options.conf",
+      "sudo systemctl daemon-reload",
+      "sudo service docker restart",
     ]
   }
   tags = {
-    Name = "swarm-manager-skane"
+    Name = "swarm-manager-${count.index}-skane"
     Trainer = "Sean P. Kane"
   }
 }
 
 resource "aws_instance" "worker" {
   count         = "${var.swarm_worker_count}"
-  ami           = "ami-835d69f8"
+  ami           = "ami-5c66ea23"
   instance_type = "m4.large"
   security_groups = ["${aws_security_group.swarm.name}"]
   key_name = "${aws_key_pair.deployer.key_name}"
@@ -52,6 +65,10 @@ resource "aws_instance" "worker" {
   provisioner "file" {
     source = "${var.ssh_private_key_path}"
     destination = "/home/ubuntu/key.pem"
+  }
+  provisioner "file" {
+    source = "./files/daemon.json"
+    destination = "/tmp/daemon.json"
   }
   provisioner "remote-exec" {
     inline = [
@@ -64,12 +81,15 @@ resource "aws_instance" "worker" {
       "sudo apt-get install -y docker-ce",
       "sudo chmod 400 /home/ubuntu/key.pem",
       "sudo usermod -aG docker ubuntu",
-      "#sudo scp -o StrictHostKeyChecking=no -o NoHostAuthenticationForLocalhost=yes -o UserKnownHostsFile=/dev/null -i key.pem ubuntu@${aws_instance.manager.private_ip}:/home/ubuntu/token .",
-      "#sudo docker swarm join --token $(#cat /home/ubuntu/token) ${aws_instance.manager.private_ip}:2377"
+      "wget https://storage.googleapis.com/gvisor/releases/nightly/latest/runsc",
+      "chmod +x runsc",
+      "sudo mv runsc /usr/local/bin",
+      "sudo cp /tmp/daemon.json /etc/docker/daemon.json",
+      "sudo systemctl restart docker",
     ]
   }
   tags = {
-    Name = "swarm-${count.index}-skane"
+    Name = "swarm-worker-${count.index}-skane"
     Trainer = "Sean P. Kane"
   }
 }

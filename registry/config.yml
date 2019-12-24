@@ -2,7 +2,7 @@ version: 0.1
 log:
   accesslog:
     disabled: false
-  level: debug
+  level: info
   fields:
     service: registry
     environment: development
@@ -15,8 +15,6 @@ storage:
       rootdirectory: /var/lib/registry
 http:
     addr: :5000
-    debug:
-      addr: localhost:5001
     headers:
       X-Content-Type-Options: [nosniff]
 auth:
